@@ -1,0 +1,35 @@
+[package]
+name = "bounce-clock"
+version = "0.0.2"
+edition = "2021"
+authors = ["Claude и идея Даниила Кочубейника"]
+description = "Пиксельные часы для терминала: отскок, статика, ручное управление"
+license = "MIT"
+repository = "https://github.com/ЛОГИН/bounce-clock"
+readme = "README.md"
+keywords = ["clock", "terminal", "tui", "dvd", "screensaver"]
+categories = ["command-line-utilities"]
+
+[dependencies]
+crossterm = "0.28"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+
+[package.metadata.deb]
+maintainer = "Daniil Kochubeynik"
+copyright = "2026, Daniil Kochubeynik"
+section = "utils"
+priority = "optional"
+depends = ""
+extended-description = "Пиксельные часы для терминала с DVD-отскоком, частицами и плавными переходами цифр. Работают и в Linux VT."
+assets = [
+    ["target/release/bounce-clock", "usr/bin/", "755"],
+    ["README.md", "usr/share/doc/bounce-clock/README.md", "644"],
+    ["DESIGN.md", "usr/share/doc/bounce-clock/DESIGN.md", "644"],
+]
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

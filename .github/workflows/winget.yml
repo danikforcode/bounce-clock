@@ -1,0 +1,29 @@
+# Автообновление пакета в winget после каждого релиза.
+# Работает, когда первая версия уже принята в microsoft/winget-pkgs
+# и в Settings → Secrets → Actions добавлен WINGET_TOKEN
+# (classic PAT с правом public_repo, у вас должен быть форк winget-pkgs).
+# Без секрета шаг просто пропускается.
+name: winget
+
+on:
+  release:
+    types: [released]
+  workflow_dispatch:
+
+jobs:
+  publish:
+    runs-on: windows-latest
+    steps:
+      - name: Check token
+        id: chk
+        shell: bash
+        env:
+          T: ${{ secrets.WINGET_TOKEN }}
+        run: echo "ok=$([ -n "$T" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+
+      - uses: vedantmgoyal9/winget-releaser@v2
+        if: steps.chk.outputs.ok == 'true'
+        with:
+          identifier: Kochubeynik.BounceClock
+          installers-regex: '-pc-windows-msvc\.zip$'
+          token: ${{ secrets.WINGET_TOKEN }}

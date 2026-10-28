@@ -1,0 +1,88 @@
+# Сборка и публикация релиза.
+# Запуск: git tag v0.0.2 && git push origin v0.0.2
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: build ${{ matrix.target }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest,    target: x86_64-unknown-linux-musl }
+          - { os: ubuntu-24.04-arm, target: aarch64-unknown-linux-musl }
+          - { os: windows-latest,   target: x86_64-pc-windows-msvc }
+          - { os: windows-latest,   target: aarch64-pc-windows-msvc }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install musl
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+
+      - name: Build
+        run: cargo build --release --locked --target ${{ matrix.target }}
+
+      - name: Package (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          name=bounce-clock-${{ matrix.target }}
+          mkdir -p stage/$name dist
+          cp target/${{ matrix.target }}/release/bounce-clock README.md LICENSE stage/$name/
+          tar -C stage -czf dist/$name.tar.gz $name
+          (cd dist && sha256sum $name.tar.gz > $name.tar.gz.sha256)
+
+      - name: Package .deb
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          cargo install cargo-deb --locked
+          cargo deb --no-build --target ${{ matrix.target }} -o dist/
+          (cd dist && for f in *.deb; do sha256sum "$f" > "$f.sha256"; done)
+
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $name = "bounce-clock-${{ matrix.target }}"
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Compress-Archive -Path "target/${{ matrix.target }}/release/bounce-clock.exe", README.md, LICENSE -DestinationPath "dist/$name.zip"
+          $h = (Get-FileHash "dist/$name.zip" -Algorithm SHA256).Hash.ToLower()
+          "$h  $name.zip" | Out-File -Encoding ascii -NoNewline "dist/$name.zip.sha256"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.target }}
+          path: dist/*
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Checksums
+        run: cd dist && cat *.sha256 > SHA256SUMS && ls -la
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true

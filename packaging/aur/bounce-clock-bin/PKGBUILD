@@ -1,0 +1,22 @@
+# Maintainer: Daniil Kochubeynik <почта>
+pkgname=bounce-clock-bin
+_name=bounce-clock
+pkgver=0.0.2
+pkgrel=1
+pkgdesc="Pixel clock for the terminal: DVD bounce, static and manual modes (prebuilt)"
+arch=('x86_64' 'aarch64')
+url="https://github.com/ЛОГИН/bounce-clock"
+license=('MIT')
+provides=("$_name")
+conflicts=("$_name")
+source_x86_64=("$_name-$pkgver-x86_64.tar.gz::$url/releases/download/v$pkgver/$_name-x86_64-unknown-linux-musl.tar.gz")
+source_aarch64=("$_name-$pkgver-aarch64.tar.gz::$url/releases/download/v$pkgver/$_name-aarch64-unknown-linux-musl.tar.gz")
+sha256sums_x86_64=('SKIP')   # после выхода релиза: updpkgsums
+sha256sums_aarch64=('SKIP')
+
+package() {
+  cd "$_name-$CARCH-unknown-linux-musl"
+  install -Dm755 "$_name" "$pkgdir/usr/bin/$_name"
+  install -Dm644 README.md -t "$pkgdir/usr/share/doc/$_name/"
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$_name/LICENSE"
+}
