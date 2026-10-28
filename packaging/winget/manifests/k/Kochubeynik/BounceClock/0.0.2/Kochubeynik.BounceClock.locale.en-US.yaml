@@ -3,11 +3,11 @@ PackageIdentifier: Kochubeynik.BounceClock
 PackageVersion: 0.0.2
 PackageLocale: en-US
 Publisher: Daniil Kochubeynik
-PublisherUrl: https://github.com/ЛОГИН
+PublisherUrl: https://github.com/danikforcode
 PackageName: bounce-clock
-PackageUrl: https://github.com/ЛОГИН/bounce-clock
+PackageUrl: https://github.com/danikforcode/bounce-clock
 License: MIT
-LicenseUrl: https://github.com/ЛОГИН/bounce-clock/blob/main/LICENSE
+LicenseUrl: https://github.com/danikforcode/bounce-clock/blob/main/LICENSE
 ShortDescription: Pixel clock for the terminal with DVD-style bouncing, particles and animated digit transitions.
 Description: |-
   bounce-clock draws a big pixel clock using only ▀▄█ characters.

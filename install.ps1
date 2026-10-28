@@ -1,14 +1,14 @@
 # bounce-clock — установка на Windows одной строкой (PowerShell):
-#   irm https://raw.githubusercontent.com/ЛОГИН/bounce-clock/main/install.ps1 | iex
+#   irm https://raw.githubusercontent.com/danikforcode/bounce-clock/main/install.ps1 | iex
 # Удаление:
-#   & ([scriptblock]::Create((irm https://raw.githubusercontent.com/ЛОГИН/bounce-clock/main/install.ps1))) -Uninstall
+#   & ([scriptblock]::Create((irm https://raw.githubusercontent.com/danikforcode/bounce-clock/main/install.ps1))) -Uninstall
 
 param([switch]$Uninstall)
 
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 
-$Repo = if ($env:BOUNCE_CLOCK_REPO) { $env:BOUNCE_CLOCK_REPO } else { 'ЛОГИН/bounce-clock' }
+$Repo = if ($env:BOUNCE_CLOCK_REPO) { $env:BOUNCE_CLOCK_REPO } else { 'danikforcode/bounce-clock' }
 $Dir  = Join-Path $env:LOCALAPPDATA 'Programs\bounce-clock'
 
 function Set-UserPath([string[]]$parts) {

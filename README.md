@@ -16,7 +16,7 @@ winget install Kochubeynik.BounceClock
 Или без winget, одной строкой в PowerShell:
 
 ```powershell
-irm https://raw.githubusercontent.com/ЛОГИН/bounce-clock/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/danikforcode/bounce-clock/main/install.ps1 | iex
 ```
 
 Скрипт кладёт `bounce-clock.exe` в `%LOCALAPPDATA%\Programs\bounce-clock` и добавляет папку в PATH.
@@ -27,7 +27,7 @@ irm https://raw.githubusercontent.com/ЛОГИН/bounce-clock/main/install.ps1 |
 Любой дистрибутив, одной строкой:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/ЛОГИН/bounce-clock/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/danikforcode/bounce-clock/main/install.sh | sh
 ```
 
 Бинарник статический (musl), зависимостей нет. Ставится в `~/.local/bin`, под root — в `/usr/local/bin`.
@@ -39,7 +39,7 @@ yay -S bounce-clock-bin   # готовая сборка
 yay -S bounce-clock       # сборка из исходников
 ```
 
-Debian / Ubuntu: скачайте `.deb` со страницы [Releases](https://github.com/ЛОГИН/bounce-clock/releases/latest) и
+Debian / Ubuntu: скачайте `.deb` со страницы [Releases](https://github.com/danikforcode/bounce-clock/releases/latest) и
 
 ```sh
 sudo apt install ./bounce-clock_*.deb
@@ -48,13 +48,13 @@ sudo apt install ./bounce-clock_*.deb
 ### Через cargo (любая ОС)
 
 ```sh
-cargo install --git https://github.com/ЛОГИН/bounce-clock --locked
+cargo install --git https://github.com/danikforcode/bounce-clock --locked
 ```
 
 ### Удаление
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/ЛОГИН/bounce-clock/main/install.sh | sh -s -- --uninstall
+curl -fsSL https://raw.githubusercontent.com/danikforcode/bounce-clock/main/install.sh | sh -s -- --uninstall
 ```
 
 ```powershell
@@ -89,7 +89,7 @@ bounce-clock --help
 ## Сборка из исходников
 
 ```sh
-git clone https://github.com/ЛОГИН/bounce-clock
+git clone https://github.com/danikforcode/bounce-clock
 cd bounce-clock
 cargo build --release
 ./target/release/bounce-clock

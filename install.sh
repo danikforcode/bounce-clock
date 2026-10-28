@@ -1,13 +1,13 @@
 #!/bin/sh
 # bounce-clock — установка на Linux одной строкой:
-#   curl -fsSL https://raw.githubusercontent.com/ЛОГИН/bounce-clock/main/install.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/danikforcode/bounce-clock/main/install.sh | sh
 # Удаление:
-#   curl -fsSL https://raw.githubusercontent.com/ЛОГИН/bounce-clock/main/install.sh | sh -s -- --uninstall
+#   curl -fsSL https://raw.githubusercontent.com/danikforcode/bounce-clock/main/install.sh | sh -s -- --uninstall
 #
 # Переменные: BIN_DIR (куда ставить), BOUNCE_CLOCK_VERSION (например v0.0.2, по умолчанию последняя).
 set -eu
 
-REPO="${BOUNCE_CLOCK_REPO:-ЛОГИН/bounce-clock}"
+REPO="${BOUNCE_CLOCK_REPO:-danikforcode/bounce-clock}"
 NAME=bounce-clock
 
 say() { printf '%s\n' "$*"; }

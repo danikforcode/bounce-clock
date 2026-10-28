@@ -5,7 +5,7 @@
 ### 1. Репозиторий
 
 ```sh
-grep -rlw danikforcode --exclude-dir=target --exclude=RELEASING.md . | xargs sed -i 's/\bUSER\b/ЛОГИН/g'
+grep -rlw danikforcode --exclude-dir=target --exclude=RELEASING.md . | xargs sed -i 's/\bUSER\b/danikforcode/g'
 ```
 
 ```sh
@@ -13,7 +13,7 @@ git init
 git add .
 git commit -m "bounce-clock 0.0.2"
 git branch -M main
-git remote add origin git@github.com:ЛОГИН/bounce-clock.git
+git remote add origin git@github.com:danikforcode/bounce-clock.git
 git push -u origin main
 ```
 
@@ -48,7 +48,7 @@ GitHub Actions (`.github/workflows/release.yml`) соберёт за ~5 мину
 
 ```powershell
 winget install Microsoft.WingetCreate
-wingetcreate new https://github.com/ЛОГИН/bounce-clock/releases/download/v0.0.2/bounce-clock-x86_64-pc-windows-msvc.zip https://github.com/ЛОГИН/bounce-clock/releases/download/v0.0.2/bounce-clock-aarch64-pc-windows-msvc.zip
+wingetcreate new https://github.com/danikforcode/bounce-clock/releases/download/v0.0.2/bounce-clock-x86_64-pc-windows-msvc.zip https://github.com/danikforcode/bounce-clock/releases/download/v0.0.2/bounce-clock-aarch64-pc-windows-msvc.zip
 ```
 
 На вопросы отвечайте по готовым манифестам из `packaging/winget/` (идентификатор `Kochubeynik.BounceClock`,
