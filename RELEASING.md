@@ -51,20 +51,20 @@ winget install Microsoft.WingetCreate
 wingetcreate new https://github.com/danikforcode/bounce-clock/releases/download/v0.0.2/bounce-clock-x86_64-pc-windows-msvc.zip https://github.com/danikforcode/bounce-clock/releases/download/v0.0.2/bounce-clock-aarch64-pc-windows-msvc.zip
 ```
 
-На вопросы отвечайте по готовым манифестам из `packaging/winget/` (идентификатор `Kochubeynik.BounceClock`,
+На вопросы отвечайте по готовым манифестам из `packaging/winget/` (идентификатор `danikforcode.BounceClock`,
 тип portable, команда `bounce-clock`), в конце согласитесь отправить PR.
 
-Вариант вручную: вставьте хэши из `SHA256SUMS` в `Kochubeynik.BounceClock.installer.yaml`, затем
+Вариант вручную: вставьте хэши из `SHA256SUMS` в `danikforcode.BounceClock.installer.yaml`, затем
 
 ```powershell
-winget validate packaging\winget\manifests\k\Kochubeynik\BounceClock\0.0.2
+winget validate packaging\winget\manifests\d\danikforcode\BounceClock\0.0.2
 winget settings --enable LocalManifestFiles     # от администратора
-winget install --manifest packaging\winget\manifests\k\Kochubeynik\BounceClock\0.0.2
+winget install --manifest packaging\winget\manifests\d\danikforcode\BounceClock\0.0.2
 ```
 
-и скопируйте папку `manifests/k/Kochubeynik/BounceClock/0.0.2` в свой форк `winget-pkgs` с PR.
+и скопируйте папку `manifests/d/danikforcode/BounceClock/0.0.2` в свой форк `winget-pkgs` с PR.
 
-Пока PR не принят, `winget install Kochubeynik.BounceClock` не найдёт пакет — пользуйтесь `install.ps1`.
+Пока PR не принят, `winget install danikforcode.BounceClock` не найдёт пакет — пользуйтесь `install.ps1`.
 
 ### 4. AUR
 
@@ -87,5 +87,5 @@ git add PKGBUILD .SRCINFO && git commit -m "0.0.2" && git push
 1. Поднимите `version` в `Cargo.toml` (и строку версии в `config.rs` → `example()`), закоммитьте.
 2. `git tag vX.Y.Z && git push origin vX.Y.Z` — релиз соберётся сам.
 3. winget: если в Secrets добавлен `WINGET_TOKEN` (classic PAT с `public_repo`, нужен форк `winget-pkgs`),
-   workflow `winget.yml` сам отправит PR с новой версией. Иначе: `wingetcreate update Kochubeynik.BounceClock -v X.Y.Z -u <url x64> <url arm64> --submit`.
+   workflow `winget.yml` сам отправит PR с новой версией. Иначе: `wingetcreate update danikforcode.BounceClock -v X.Y.Z -u <url x64> <url arm64> --submit`.
 4. AUR: в обоих PKGBUILD поменяйте `pkgver`, `pkgrel=1`, затем `updpkgsums`, `.SRCINFO`, push.

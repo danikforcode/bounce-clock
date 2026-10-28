@@ -24,6 +24,6 @@ jobs:
       - uses: vedantmgoyal9/winget-releaser@v2
         if: steps.chk.outputs.ok == 'true'
         with:
-          identifier: Kochubeynik.BounceClock
+          identifier: danikforcode.BounceClock
           installers-regex: '-pc-windows-msvc\.zip$'
           token: ${{ secrets.WINGET_TOKEN }}

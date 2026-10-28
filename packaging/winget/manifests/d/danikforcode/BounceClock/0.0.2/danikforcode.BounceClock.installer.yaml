@@ -1,6 +1,6 @@
 # yaml-language-server: $schema=https://aka.ms/winget-manifest.installer.1.9.0.schema.json
 # Хэши взять из SHA256SUMS в релизе v0.0.2 (или пересоздать манифест через wingetcreate).
-PackageIdentifier: Kochubeynik.BounceClock
+PackageIdentifier: danikforcode.BounceClock
 PackageVersion: 0.0.2
 InstallerType: zip
 NestedInstallerType: portable

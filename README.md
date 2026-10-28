@@ -10,7 +10,7 @@ Claude и идея Даниила Кочубейника.
 ### Windows
 
 ```powershell
-winget install Kochubeynik.BounceClock
+winget install danikforcode.BounceClock
 ```
 
 Или без winget, одной строкой в PowerShell:
@@ -58,7 +58,7 @@ curl -fsSL https://raw.githubusercontent.com/danikforcode/bounce-clock/main/inst
 ```
 
 ```powershell
-winget uninstall Kochubeynik.BounceClock
+winget uninstall danikforcode.BounceClock
 ```
 
 ## Запуск
