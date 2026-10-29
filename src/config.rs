@@ -11,11 +11,11 @@ pub enum Value {
     Str(String),
 }
 
-struct Table {
-    name: String,
-    array: bool,
-    entries: Vec<(String, Value, usize)>,
-    line: usize,
+pub struct Table {
+    pub name: String,
+    pub array: bool,
+    pub entries: Vec<(String, Value, usize)>,
+    pub line: usize,
 }
 
 pub struct Rule {
@@ -46,6 +46,8 @@ pub enum Action {
     CornerRun,
     Wave,
     Mode(usize),
+    /// Эффект будильника: индекс в alarm::EFFECTS.
+    Fx(usize),
 }
 
 pub struct Event {
@@ -86,19 +88,25 @@ impl Config {
 pub struct Paths {
     pub config: PathBuf,
     pub tuned: PathBuf,
+    pub alarms: PathBuf,
 }
 
 impl Paths {
     pub fn new(custom: Option<PathBuf>) -> Self {
         let config = custom.unwrap_or_else(|| default_dir().join("config.toml"));
         let tuned = config.with_file_name("tuned.toml");
-        Paths { config, tuned }
+        let alarms = config.with_file_name("alarms.toml");
+        Paths { config, tuned, alarms }
     }
 
     pub fn mtime(&self) -> Option<SystemTime> {
         let a = fs::metadata(&self.config).and_then(|m| m.modified()).ok();
         let b = fs::metadata(&self.tuned).and_then(|m| m.modified()).ok();
         a.max(b)
+    }
+
+    pub fn alarms_mtime(&self) -> Option<SystemTime> {
+        fs::metadata(&self.alarms).and_then(|m| m.modified()).ok()
     }
 }
 
@@ -133,7 +141,7 @@ pub fn load(p: &Paths) -> Result<Config, String> {
     Ok(cfg)
 }
 
-fn parse(src: &str) -> Result<Vec<Table>, String> {
+pub fn parse(src: &str) -> Result<Vec<Table>, String> {
     let mut tables = vec![Table { name: String::new(), array: false, entries: Vec::new(), line: 0 }];
     for (n, raw) in src.lines().enumerate() {
         let ln = n + 1;
@@ -195,7 +203,7 @@ fn to_param(i: usize, v: &Value) -> Option<f32> {
     }
 }
 
-const SECTIONS: &[&str] = &["display", "clock", "transitions", "physics", "modes", "fx"];
+const SECTIONS: &[&str] = &["display", "clock", "transitions", "physics", "modes", "fx", "calendar", "alarms"];
 
 fn interpret(tables: &[Table], cfg: &mut Config, label: &str) {
     for t in tables {
@@ -246,18 +254,18 @@ fn interpret(tables: &[Table], cfg: &mut Config, label: &str) {
     }
 }
 
-fn get<'a>(t: &'a Table, k: &str) -> Option<&'a Value> {
+pub fn get<'a>(t: &'a Table, k: &str) -> Option<&'a Value> {
     t.entries.iter().find(|(key, _, _)| key == k).map(|(_, v, _)| v)
 }
 
-fn get_str<'a>(t: &'a Table, k: &str) -> Option<&'a str> {
+pub fn get_str<'a>(t: &'a Table, k: &str) -> Option<&'a str> {
     match get(t, k) {
         Some(Value::Str(s)) => Some(s.as_str()),
         _ => None,
     }
 }
 
-fn parse_hm(s: &str) -> Option<u32> {
+pub fn parse_hm(s: &str) -> Option<u32> {
     let (h, m) = s.trim().split_once(':')?;
     let h: u32 = h.trim().parse().ok()?;
     let m: u32 = m.trim().parse().ok()?;
@@ -273,7 +281,7 @@ fn day(s: &str) -> Option<u8> {
     DAYS.iter().position(|d| *d == s.trim()).map(|i| i as u8)
 }
 
-fn parse_days(s: &str) -> Option<u8> {
+pub fn parse_days(s: &str) -> Option<u8> {
     let s = s.to_ascii_lowercase();
     if s == "all" || s == "daily" {
         return Some(0);
@@ -339,6 +347,9 @@ fn event_from(t: &Table) -> Result<Event, String> {
     let action = match get_str(t, "action").unwrap_or("wave") {
         "corner-run" => Action::CornerRun,
         "wave" => Action::Wave,
+        fx if crate::alarm::EFFECTS[..4].contains(&fx) => {
+            Action::Fx(crate::alarm::EFFECTS.iter().position(|e| *e == fx).unwrap_or(0))
+        }
         m if m.starts_with("mode:") => {
             Action::Mode(P::MODES.iter().position(|x| *x == &m[5..]).ok_or("bad mode")?)
         }
@@ -368,11 +379,21 @@ pub fn save_tuned(p: &Paths, v: &P::Values) -> std::io::Result<()> {
 
 pub fn example() -> String {
     let mut s = String::new();
-    s.push_str("# bounce-clock 0.0.2 — конфиг\n");
+    s.push_str(&format!("# bounce-clock {} — конфиг\n", env!("CARGO_PKG_VERSION")));
     s.push_str("# Claude и идея Даниила Кочубейника\n");
     s.push_str("# Изменения подхватываются на лету, перезапуск не нужен.\n");
-    let mut cur = "";
+    let mut sections: Vec<&str> = Vec::new();
     for p in PARAMS.iter() {
+        let sec = p.key.split_once('.').map_or("", |(a, _)| a);
+        if !sections.contains(&sec) {
+            sections.push(sec);
+        }
+    }
+    let mut cur = "";
+    let ordered = sections
+        .iter()
+        .flat_map(|sec| PARAMS.iter().filter(move |p| p.key.split_once('.').map_or("", |(a, _)| a) == *sec));
+    for p in ordered {
         let (sec, key) = p.key.split_once('.').unwrap_or(("", p.key));
         if sec != cur {
             s.push_str(&format!("\n[{sec}]\n"));
@@ -436,8 +457,21 @@ physics.squash = 1.3
 # ---------- события ----------
 # every = "hour" | "half-hour" | "minute" | "15m" ...
 # action = "wave" | "corner-run" | "mode:bounce" | "mode:static" | "mode:manual"
+#          | "confetti" | "explosion" | "shatter" | "blink"
 
 [[event]]
 every = "hour"
 action = "wave"
+
+# ---------- будильники ----------
+# Хранятся в alarms.toml рядом с этим файлом. Удобнее всего править
+# в меню (клавиша b), но можно и руками:
+#
+# [[alarm]]
+# time = "07:30"
+# days = "mon-fri"       # once | all | mon-fri | sat,sun ...
+# effect = "shatter"     # confetti | explosion | shatter | blink | random
+# label = "Подъём"
+# bell = true            # звуковой сигнал терминала
+# enabled = true
 "##;

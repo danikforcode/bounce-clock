@@ -2,7 +2,7 @@ use std::f32::consts::PI;
 
 use crate::font::{Assets, Sprite};
 use crate::params::{self as P, Values};
-use crate::sim::{Boot, PartKind, Particle, Sim, Slot, DIGIT_TOP};
+use crate::sim::{Boot, Break, BreakKind, PartKind, Particle, Sim, Slot, BACK, DIGIT_TOP, FLY};
 
 pub struct Grid {
     pub cols: usize,
@@ -14,16 +14,13 @@ pub struct Grid {
     pub vh: usize,
 }
 
-pub fn grid(cols: usize, rows: usize, scale: usize) -> Grid {
+/// need — размер коробки часов (с запасом), меньше которого холст быть не должен.
+pub fn grid(cols: usize, rows: usize, scale: usize, need: (usize, usize)) -> Grid {
     let hw = cols;
     let hh = rows * 2;
-    let auto = (hw / 80).min(hh / 48).max(1);
-    let k = if scale == 0 {
-        auto
-    } else {
-        scale.min((hw / 45).max(1)).min((hh / 17).max(1))
-    }
-    .max(1);
+    let fit = (hw / need.0.max(1)).min(hh / need.1.max(1)).max(1);
+    let auto = (hw / 80).min(hh / 48).max(1).min(fit);
+    let k = if scale == 0 { auto } else { scale.min(fit) }.max(1);
     let vw = hw / k;
     let vh = hh / k;
     Grid { cols, rows, k, ox: (hw - vw * k) / 2, oy: (hh - vh * k) / 2, vw, vh }
@@ -146,6 +143,7 @@ fn draw_slot(p: &mut Painter, a: &Assets, s: &Slot, t: f32, colon_on: bool) {
         return;
     }
     let d = tr.dur;
+    let gh = gf.h.max(gt.h) as f32;
     match tr.style {
         P::STYLE_MORPH => {
             for q in &tr.pairs {
@@ -157,16 +155,16 @@ fn draw_slot(p: &mut Painter, a: &Assets, s: &Slot, t: f32, colon_on: bool) {
             }
         }
         P::STYLE_ROLL => {
-            let off = ease_back((lt / d).clamp(0.0, 1.0)) * 8.0;
+            let off = ease_back((lt / d).clamp(0.0, 1.0)) * (gh + 1.0);
             for &(x, y) in &gf.pts {
                 let r = (y as f32 - off).round();
-                if (0.0..=6.0).contains(&r) {
+                if (0.0..gh).contains(&r) {
                     p.set(bx + x as f32, by + r);
                 }
             }
             for &(x, y) in &gt.pts {
-                let r = (y as f32 + 8.0 - off).round();
-                if (0.0..=6.0).contains(&r) {
+                let r = (y as f32 + gh + 1.0 - off).round();
+                if (0.0..gh).contains(&r) {
                     p.set(bx + x as f32, by + r);
                 }
             }
@@ -187,19 +185,19 @@ fn draw_slot(p: &mut Painter, a: &Assets, s: &Slot, t: f32, colon_on: bool) {
             }
         }
         _ => {
-            let g = 55.0 / (d * d);
+            let g = 55.0 * gh / 7.0 / (d * d);
             for &(x, y) in &gf.pts {
-                let d0 = x as f32 * d * 0.06 + tr.cr[(x as usize).min(3)] * d * 0.1;
+                let d0 = x as f32 * d * 0.06 * 4.0 / gf.w.max(1) as f32 + tr.cr[(x as usize) % 4] * d * 0.1;
                 let tt = (lt - d0).max(0.0);
                 p.set(bx + x as f32, by + y as f32 + 0.5 * g * tt * tt);
             }
             for &(x, y) in &gt.pts {
-                let dn = d * 0.35 + x as f32 * d * 0.07 + tr.cr[(x as usize).min(3)] * d * 0.1;
+                let dn = d * 0.35 + x as f32 * d * 0.07 * 4.0 / gt.w.max(1) as f32 + tr.cr[(x as usize) % 4] * d * 0.1;
                 let pr = ((lt - dn) / (d * 0.7)).clamp(0.0, 1.0);
                 if pr <= 0.0 {
                     continue;
                 }
-                p.set(bx + x as f32, by + y as f32 - (1.0 - ease_bounce(pr)) * 9.0);
+                p.set(bx + x as f32, by + y as f32 - (1.0 - ease_bounce(pr)) * (gh + 2.0));
             }
         }
     }
@@ -334,10 +332,145 @@ fn draw_part(dst: &mut Canvas, a: &Assets, p: &Particle) {
             &a.dust[if f < 0.4 { 0 } else if f < 0.75 { 1 } else { 2 }]
         }
         PartKind::Text => &a.plus_one,
+        PartKind::Confetti => {
+            if p.rest {
+                &a.conf[1]
+            } else {
+                &a.conf[((p.age * 7.0 + p.phase * 3.0) as usize) % 3]
+            }
+        }
     };
     let (ox, oy) = (p.x.round() as i32, p.y.round() as i32);
     for &(x, y) in &g.pts {
         dst.set(ox + x, oy + y, true);
+    }
+}
+
+fn hash(a: u32) -> f32 {
+    let mut x = a.wrapping_mul(0x9E37_79B1);
+    x ^= x >> 15;
+    x = x.wrapping_mul(0x85EB_CA77);
+    x ^= x >> 13;
+    x = x.wrapping_mul(0xC2B2_AE3D);
+    x ^= x >> 16;
+    (x >> 8) as f32 / (1u32 << 24) as f32
+}
+
+/// Часы, разлетевшиеся на куски: разбитие (осколки) или взрыв (пиксели).
+fn draw_break(dst: &mut Canvas, src: &Canvas, b: &Break, t: f32, grav: f32) {
+    let lt = t - b.t0;
+    let (w, h) = (src.w, src.h);
+    if w == 0 || h == 0 {
+        return;
+    }
+    let (fw, fh) = ((dst.w as f32 - 1.0).max(0.0), (dst.h as f32 - 1.0).max(0.0));
+    let land = |x: f32, y: f32| (x.clamp(0.0, fw), y.min(fh));
+    let crack = b.crack();
+    let tau = lt - crack;
+
+    let own: Vec<u8> = if b.kind == BreakKind::Shatter {
+        let mut o = vec![0u8; w * h];
+        for v in 0..h {
+            for u in 0..w {
+                let (px, py) = (u as f32 + 0.5, v as f32 + 0.5);
+                let mut best = 0;
+                let mut bd = f32::MAX;
+                for (i, s) in b.shards.iter().enumerate() {
+                    let d = (s.cx - px).powi(2) + (s.cy - py).powi(2);
+                    if d < bd {
+                        bd = d;
+                        best = i;
+                    }
+                }
+                o[v * w + u] = best as u8;
+            }
+        }
+        o
+    } else {
+        Vec::new()
+    };
+    // Радиус осколка: когда его нижний край касается пола, осколок замирает целиком.
+    let mut radius = vec![0.0f32; b.shards.len()];
+    if b.kind == BreakKind::Shatter {
+        for v in 0..h {
+            for u in 0..w {
+                if src.get(u, v) {
+                    let si = own[v * w + u] as usize;
+                    let s = &b.shards[si];
+                    let d = ((u as f32 + 0.5 - s.cx).powi(2) + (v as f32 + 0.5 - s.cy).powi(2)).sqrt();
+                    radius[si] = radius[si].max(d);
+                }
+            }
+        }
+    }
+    let land_t: Vec<f32> = b
+        .shards
+        .iter()
+        .zip(&radius)
+        .map(|(s, r)| {
+            let drop = fh - (b.oy + s.cy + r);
+            if drop <= 0.0 || grav <= 0.0 {
+                return 0.0;
+            }
+            (-s.vy + (s.vy * s.vy + 2.0 * grav * drop).sqrt()) / grav
+        })
+        .collect();
+
+    for v in 0..h {
+        for u in 0..w {
+            if !src.get(u, v) {
+                continue;
+            }
+            let i = v * w + u;
+            let home = (b.ox + u as f32, b.oy + v as f32);
+            let pos_at: Box<dyn Fn(f32) -> (f32, f32)> = match b.kind {
+                BreakKind::Shatter => {
+                    let si = own[i] as usize;
+                    let s = &b.shards[si];
+                    let tl = land_t[si];
+                    let (dx, dy) = (u as f32 + 0.5 - s.cx, v as f32 + 0.5 - s.cy);
+                    let (ox, oy) = (b.ox, b.oy);
+                    Box::new(move |tt: f32| {
+                        let tt = tt.min(tl);
+                        let (sn, cs) = (s.spin * tt).sin_cos();
+                        let rx = dx * cs - dy * sn;
+                        let ry = dx * sn + dy * cs;
+                        land(
+                            ox + s.cx + rx + s.vx * tt - 0.5,
+                            oy + s.cy + ry + s.vy * tt + 0.5 * grav * tt * tt - 0.5,
+                        )
+                    })
+                }
+                BreakKind::Explosion => {
+                    let k = i as u32 ^ b.seed;
+                    let (h1, h2, h3) = (hash(k), hash(k.wrapping_mul(3) ^ 0x5bd1_e995), hash(k.wrapping_add(0x27d4_eb2d)));
+                    let ddx = (u as f32 + 0.5 - w as f32 / 2.0) / (w as f32 / 2.0);
+                    let ddy = (v as f32 + 0.5 - h as f32 / 2.0) / (h as f32 / 2.0);
+                    let sp = 14.0 + 30.0 * h1;
+                    let vx = ddx * sp + (h2 - 0.5) * 14.0;
+                    let vy = ddy * sp * 0.6 - 22.0 - h3 * 22.0;
+                    Box::new(move |tt: f32| land(home.0 + vx * tt, home.1 + vy * tt + 0.5 * grav * tt * tt))
+                }
+            };
+            let p = if tau < 0.0 {
+                // трещины: пиксели на границах осколков гаснут и мерцают
+                let s = own[i];
+                let edge = (u + 1 < w && own[i + 1] != s) || (v + 1 < h && own[i + w] != s);
+                if edge && (lt > crack * 0.5 || ((lt * 24.0) as i32) % 2 == 0) {
+                    continue;
+                }
+                home
+            } else if tau < FLY {
+                pos_at(tau)
+            } else {
+                let from = pos_at(FLY);
+                let delay = if b.kind == BreakKind::Explosion { hash(i as u32 ^ b.seed) * 0.3 } else { 0.0 };
+                let r = ((tau - FLY - delay) / (BACK - 0.3).max(0.2)).clamp(0.0, 1.0);
+                let e = ease_io(r);
+                (from.0 + (home.0 - from.0) * e, from.1 + (home.1 - from.1) * e)
+            };
+            dst.set(p.0.round() as i32, p.1.round() as i32, true);
+        }
     }
 }
 
@@ -374,16 +507,20 @@ impl Renderer {
             draw_part(&mut self.cv, a, p);
         }
 
-        let inv = sim.inv_t > 0.0 && ((sim.inv_t * 18.0) as i32) % 2 == 0;
+        let inv = (sim.inv_t > 0.0 && ((sim.inv_t * 18.0) as i32) % 2 == 0)
+            || (sim.blink_t > 0.0 && ((sim.blink_t * 5.0) as i32) % 2 == 1);
         build_clock(sim, a, v, colon_on, inv, &mut self.clock);
 
         let ix = sim.px + (sim.x - sim.px) * sim.alpha;
         let iy = sim.py + (sim.y - sim.py) * sim.alpha;
         let (sx, sy) = (sim.sx.x, sim.sy.x);
-        let left = ix + sim.ax * sim.bw * (1.0 - sx);
+        let shake = if sim.strain > 0.0 { (sim.t * 55.0).sin() * (0.4 + sim.strain) } else { 0.0 };
+        let left = ix + sim.ax * sim.bw * (1.0 - sx) + shake;
         let top = iy + sim.ay * sim.bh * (1.0 - sy);
 
-        if let Some(o) = sim.outro {
+        if let Some(b) = &sim.brk {
+            draw_break(&mut self.cv, &self.clock, b, sim.t, v.f(P::GRAVITY));
+        } else if let Some(o) = sim.outro {
             crumble(&mut self.cv, &self.clock, ix.round(), iy.round(), o, v.f(P::GRAVITY));
         } else {
             if v.b(P::SHADOW) {

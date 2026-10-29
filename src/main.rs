@@ -1,3 +1,5 @@
+mod alarm;
+mod calendar;
 mod config;
 mod font;
 mod params;
@@ -20,7 +22,7 @@ use crossterm::{
 
 use font::Assets;
 use params::{self as P, Values};
-use sim::{Mode, Sim};
+use sim::{BreakKind, Mode, Sim};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 const AUTHORS: &str = env!("CARGO_PKG_AUTHORS");
@@ -44,6 +46,7 @@ fn print_help() {
   --speed N  --fps N  --particles F  --scale N
   --no-seconds                  без секунд (часы уже)
   --no-boot                     без анимаций запуска и выхода
+  --calendar hidden|compact|grid  вид календаря
   --print-config                напечатать конфиг со всеми параметрами
   -V, --version   -h, --help
 
@@ -52,6 +55,13 @@ fn print_help() {
   стрелки     толкать (ручной)     Shift+стрелки  сдвиг на 1 пиксель
   c  в центр    a  в угол    z  замедление    t  стиль переходов
   p  профиль    Tab  настройки   ?  справка   q  выход (повторно — сразу)
+  s  стиль цифр (classic, big, segment, dots, outline)
+  + -  размер часов    0  размер авто
+  v  вид даты (скрыта / строка / сетка месяца)
+  k  меню календаря    b  будильники
+
+Будильник звонит: любая клавиша — выключить, s — отложить.
+Ручной режим: удар об стену на скорости или долгое давление в стену разбивает часы.
 
 Конфиг: {}",
         config::Paths::new(None).config.display()
@@ -115,6 +125,12 @@ fn parse_cli() -> Cli {
                 i += 1;
             }
             "--no-seconds" => c.overrides.push((P::SECONDS, 0.0)),
+            "--calendar" => {
+                if let Some(i) = next.and_then(|m| P::CAL_VIEWS.iter().position(|x| *x == m.as_str())) {
+                    c.overrides.push((P::CAL_VIEW, i as f32));
+                }
+                i += 1;
+            }
             "--no-boot" => {
                 c.overrides.push((P::BOOT, 0.0));
                 c.overrides.push((P::OUTRO, 0.0));
@@ -234,10 +250,30 @@ struct App {
     last_input: Instant,
     idle_saved: Option<Mode>,
     colon_on: bool,
+    alarms: Vec<alarm::Alarm>,
+    alarm_mtime: Option<SystemTime>,
+    amenu: alarm::Menu,
+    ring: Option<Ring>,
+    snoozed: Vec<(Instant, alarm::Alarm)>,
+    bell: bool,
+    auto_ru: bool,
+    cal_offset: i32,
+    cal_text: Option<calendar::Text>,
+    fx_n: u32,
+    assets: Assets,
+    style: usize,
+}
+
+/// Звонящий будильник (или предпросмотр эффекта из меню).
+struct Ring {
+    alarm: alarm::Alarm,
+    started: Instant,
+    next: Instant,
+    preview: bool,
 }
 
 impl App {
-    fn new(cli: Cli, is_vt: bool, a: &Assets) -> io::Result<App> {
+    fn new(cli: Cli, is_vt: bool) -> io::Result<App> {
         let paths = config::Paths::new(cli.config.clone());
         let mut ui = ui::Ui::new(is_vt);
         let cfg = match config::load(&paths) {
@@ -251,18 +287,37 @@ impl App {
             ui.status(w);
         }
         let vals = compose(&cfg, cli.profile.as_deref(), &cli.overrides);
+        let (alarms, alarm_warn) = alarm::load(&paths.alarms);
+        if let Some(w) = alarm_warn.first() {
+            ui.status(w);
+        }
         let (c, r) = terminal::size()?;
         let (cols, rows) = (c as usize, r as usize);
-        let g = render::grid(cols, rows, vals.c(P::SCALE));
+        let style = vals.c(P::STYLE);
+        let assets = Assets::new(style);
         let text = time_text(&vals, &Local::now());
-        let mut sim = Sim::new(g.vw, g.vh, &text);
+        let (bw, bh) = assets.metrics.box_size(&text);
+        let g = render::grid(cols, rows, vals.c(P::SCALE), (bw as usize + 2, bh as usize + 2));
+        let mut sim = Sim::new(g.vw, g.vh, &text, assets.metrics);
         let start = cli.mode.unwrap_or(vals.c(P::START_MODE));
         sim.set_initial_mode(Mode::from_index(start), &vals);
         if vals.b(P::BOOT) {
-            sim.start_boot(a);
+            sim.start_boot(&assets);
         }
         Ok(App {
             mtime: paths.mtime(),
+            alarm_mtime: paths.alarms_mtime(),
+            alarms,
+            amenu: alarm::Menu::new(),
+            ring: None,
+            snoozed: Vec::new(),
+            bell: false,
+            auto_ru: calendar::auto_ru(is_vt),
+            cal_offset: 0,
+            cal_text: None,
+            fx_n: 0,
+            assets,
+            style,
             cfg,
             paths,
             profile: cli.profile,
@@ -284,10 +339,42 @@ impl App {
         })
     }
 
+    fn need(&self) -> (usize, usize) {
+        (self.sim.bw.ceil() as usize + 2, self.sim.bh.ceil() as usize + 2)
+    }
+
     fn regrid(&mut self) {
         self.need_regrid = false;
-        self.g = render::grid(self.cols, self.rows, self.vals.c(P::SCALE));
+        self.g = render::grid(self.cols, self.rows, self.vals.c(P::SCALE), self.need());
         self.sim.resize(self.g.vw, self.g.vh);
+    }
+
+    /// Стиль цифр поменялся (клавиша s, настройки, профиль) — новый шрифт и размеры.
+    fn sync_style(&mut self) {
+        let style = self.vals.c(P::STYLE);
+        if style == self.style {
+            return;
+        }
+        self.style = style;
+        self.assets = Assets::new(style);
+        let text = time_text(&self.vals, &Local::now());
+        self.sim.set_metrics(self.assets.metrics, &text);
+        self.need_regrid = true;
+    }
+
+    fn resize_clock(&mut self, d: i32) {
+        let want = if d == 0 { 0 } else { (self.g.k as i32 + d).clamp(1, 8) as usize };
+        let g = render::grid(self.cols, self.rows, want, self.need());
+        let label = if want == 0 {
+            format!("size: auto ({})", g.k)
+        } else if g.k < want {
+            format!("size: {} (max for this window)", g.k)
+        } else {
+            format!("size: {}", g.k)
+        };
+        self.vals.set(P::SCALE, if want == 0 { 0.0 } else { g.k as f32 });
+        self.need_regrid = true;
+        self.ui.status(&label);
     }
 
     fn recompose(&mut self) {
@@ -307,6 +394,9 @@ impl App {
         let mut w = Duration::from_millis(u64::from(500 - ms.min(499)) + 2);
         if let Some(left) = self.ui.status_left() {
             w = w.min(left + Duration::from_millis(5));
+        }
+        if self.ring.is_some() {
+            w = w.min(Duration::from_millis(100));
         }
         w
     }
@@ -349,11 +439,24 @@ impl App {
         if k.modifiers.contains(KeyModifiers::CONTROL) && k.code == KeyCode::Char('c') {
             return true;
         }
+        if self.ring.as_ref().map_or(false, |r| !r.preview) {
+            self.stop_ring(k.code == KeyCode::Char('s'));
+            return false;
+        }
         if let Some(m) = self.idle_saved.take() {
             self.sim.set_mode(m, &self.vals);
             return false;
         }
-        if self.ui.open {
+        if self.amenu.open {
+            let act = self.amenu.key(k, &mut self.alarms);
+            match act {
+                alarm::Action::Changed => self.save_alarms(),
+                alarm::Action::Preview(a) => self.start_ring(a, true),
+                alarm::Action::Close | alarm::Action::None => {}
+            }
+            return false;
+        }
+        if self.ui.is_open() {
             self.settings_key(k);
             return false;
         }
@@ -367,9 +470,20 @@ impl App {
                 if self.sim.outro.is_some() || !self.vals.b(P::OUTRO) || !self.sim.fits() {
                     return true;
                 }
-                self.sim.start_outro();
+                self.sim.start_outro(self.vals.c(P::OUTRO_STYLE));
             }
-            KeyCode::Tab => self.ui.open_settings(&self.vals),
+            KeyCode::Tab => self.ui.open(ui::Menu::Settings, &self.vals),
+            KeyCode::Char('k') => {
+                self.ui.open(ui::Menu::Calendar, &self.vals);
+                self.cal_offset = 0;
+            }
+            KeyCode::Char('b') => self.amenu.open(),
+            KeyCode::Char('v') => {
+                let n = P::CAL_VIEWS.len();
+                let next = (self.vals.c(P::CAL_VIEW) + 1) % n;
+                self.vals.set(P::CAL_VIEW, next as f32);
+                self.ui.status(&format!("calendar: {}", P::CAL_VIEWS[next]));
+            }
             KeyCode::Char('?') | KeyCode::Char('h') => self.ui.help = true,
             KeyCode::Char(' ') | KeyCode::Char('m') => {
                 let m = self.sim.mode.next();
@@ -395,6 +509,15 @@ impl App {
                 self.sim.slow = !self.sim.slow;
                 self.ui.status(if self.sim.slow { "slow-mo on" } else { "slow-mo off" });
             }
+            KeyCode::Char('s') => {
+                let n = font::STYLES.len();
+                let next = (self.vals.c(P::STYLE) + 1) % n;
+                self.vals.set(P::STYLE, next as f32);
+                self.ui.status(&format!("style: {}", font::STYLES[next]));
+            }
+            KeyCode::Char('+') | KeyCode::Char('=') => self.resize_clock(1),
+            KeyCode::Char('-') | KeyCode::Char('_') => self.resize_clock(-1),
+            KeyCode::Char('0') => self.resize_clock(0),
             KeyCode::Char('t') => {
                 let s = (self.vals.c(P::TR_HOURS) + 1) % P::STYLES.len();
                 for i in [P::TR_HOURS, P::TR_MINUTES, P::TR_SECONDS] {
@@ -409,13 +532,20 @@ impl App {
     }
 
     fn settings_key(&mut self, k: KeyEvent) {
+        let cal = self.ui.menu == ui::Menu::Calendar;
         match k.code {
-            KeyCode::Up => self.ui.sel = (self.ui.sel + P::N - 1) % P::N,
-            KeyCode::Down => self.ui.sel = (self.ui.sel + 1) % P::N,
+            KeyCode::Up => self.ui.move_sel(-1),
+            KeyCode::Down => self.ui.move_sel(1),
             KeyCode::Left => self.tweak(-1.0),
             KeyCode::Right => self.tweak(1.0),
+            KeyCode::Char('[') | KeyCode::PageUp if cal => self.cal_offset -= 1,
+            KeyCode::Char(']') | KeyCode::PageDown if cal => self.cal_offset += 1,
+            KeyCode::Char('k') if cal => {
+                self.ui.close();
+                self.cal_offset = 0;
+            }
             KeyCode::Char('r') => {
-                let i = self.ui.sel;
+                let i = self.ui.current_param();
                 self.vals.set(i, P::PARAMS[i].def);
                 self.after_tweak(i);
             }
@@ -426,21 +556,26 @@ impl App {
                 }
                 self.mtime = self.paths.mtime();
                 self.ui.close();
+                self.cal_offset = 0;
             }
-            KeyCode::Tab | KeyCode::Enter => self.ui.close(),
+            KeyCode::Tab | KeyCode::Enter => {
+                self.ui.close();
+                self.cal_offset = 0;
+            }
             KeyCode::Esc => {
                 if let Some(s) = self.ui.snapshot.take() {
                     self.vals = s;
                     self.need_regrid = true;
                 }
                 self.ui.close();
+                self.cal_offset = 0;
             }
             _ => {}
         }
     }
 
     fn tweak(&mut self, dir: f32) {
-        let i = self.ui.sel;
+        let i = self.ui.current_param();
         self.vals.step(i, dir);
         self.after_tweak(i);
     }
@@ -517,11 +652,178 @@ impl App {
                 }
                 config::Action::Wave => self.sim.wave(),
                 config::Action::Mode(m) => self.change_mode(Mode::from_index(m)),
+                config::Action::Fx(e) => self.play_fx(e),
             }
         }
     }
 
-    fn tick(&mut self, dt: f32, a: &Assets) {
+    // ---------- будильники ----------
+
+    fn save_alarms(&mut self) {
+        if let Err(e) = alarm::save(&self.paths.alarms, &self.alarms) {
+            self.ui.status(&format!("alarms not saved: {e}"));
+        }
+        self.alarm_mtime = self.paths.alarms_mtime();
+    }
+
+    fn reload_alarms(&mut self) {
+        let (list, warn) = alarm::load(&self.paths.alarms);
+        self.alarms = list;
+        self.ui.status(warn.first().map_or("alarms reloaded", |w| w.as_str()));
+    }
+
+    fn play_fx(&mut self, e: usize) {
+        let e = if e >= alarm::RANDOM {
+            self.fx_n = self.fx_n.wrapping_mul(1_103_515_245).wrapping_add(12345 + Local::now().timestamp_subsec_nanos());
+            (self.fx_n >> 16) as usize % alarm::RANDOM
+        } else {
+            e
+        };
+        let ok = match e {
+            0 => {
+                self.sim.confetti(&self.vals);
+                true
+            }
+            1 => self.sim.start_break(BreakKind::Explosion, true),
+            2 => self.sim.start_break(BreakKind::Shatter, true),
+            _ => {
+                self.sim.blink();
+                self.sim.wave();
+                true
+            }
+        };
+        if !ok {
+            self.sim.confetti(&self.vals);
+        }
+    }
+
+    fn fx_len(e: usize) -> Duration {
+        let s = match e {
+            0 => 2.6,
+            1 => sim::FLY + sim::BACK + 0.7,
+            2 => sim::CRACK + sim::FLY + sim::BACK + 0.7,
+            3 => 2.2,
+            _ => 3.4,
+        };
+        Duration::from_secs_f32(s)
+    }
+
+    fn start_ring(&mut self, a: alarm::Alarm, preview: bool) {
+        if !preview {
+            self.last_input = Instant::now();
+            if let Some(m) = self.idle_saved.take() {
+                self.sim.set_mode(m, &self.vals);
+            }
+            let label = if a.label.is_empty() { String::new() } else { format!("  {}", a.label) };
+            self.ui.banner(Some(format!(
+                "ALARM {}{}  |  any key: stop   s: snooze {} min",
+                a.time_text(),
+                label,
+                self.vals.f(P::ALARM_SNOOZE)
+            )));
+        }
+        let now = Instant::now();
+        self.ring = Some(Ring { alarm: a, started: now, next: now, preview });
+    }
+
+    fn stop_ring(&mut self, snooze: bool) {
+        let Some(r) = self.ring.take() else { return };
+        self.ui.banner(None);
+        if snooze {
+            let mins = self.vals.f(P::ALARM_SNOOZE);
+            self.snoozed.push((Instant::now() + Duration::from_secs_f32(mins * 60.0), r.alarm));
+            self.ui.status(&format!("snoozed for {mins} min"));
+        } else {
+            self.ui.status("alarm off");
+        }
+    }
+
+    fn check_alarms(&mut self, minute: u32, weekday: u32) {
+        let mut fired = None;
+        let mut once = false;
+        for a in self.alarms.iter_mut() {
+            if a.matches(minute, weekday) {
+                if a.days == 0 {
+                    a.enabled = false;
+                    once = true;
+                }
+                if fired.is_none() {
+                    fired = Some(a.clone());
+                }
+            }
+        }
+        if once {
+            self.save_alarms();
+        }
+        if let Some(a) = fired {
+            self.start_ring(a, false);
+        }
+    }
+
+    fn update_ring(&mut self) {
+        let now = Instant::now();
+        if let Some(i) = self.snoozed.iter().position(|(t, _)| now >= *t) {
+            let (_, a) = self.snoozed.remove(i);
+            self.start_ring(a, false);
+        }
+        let Some(r) = self.ring.as_mut() else { return };
+        let limit = Duration::from_secs_f32(self.vals.f(P::ALARM_RING) * 60.0);
+        if !r.preview && r.started.elapsed() > limit {
+            self.stop_ring(false);
+            return;
+        }
+        if now < r.next {
+            return;
+        }
+        if r.preview && r.next > r.started {
+            self.ring = None;
+            return;
+        }
+        let (effect, bell, preview) = (r.alarm.effect, r.alarm.bell, r.preview);
+        r.next = now + Self::fx_len(effect);
+        if bell && !preview {
+            self.bell = true;
+        }
+        self.play_fx(effect);
+    }
+
+    // ---------- календарь ----------
+
+    fn update_calendar(&mut self, now: &DateTime<Local>) {
+        let v = &self.vals;
+        let ru = match v.c(P::CAL_LANG) {
+            1 => true,
+            2 => false,
+            _ => self.auto_ru,
+        };
+        let (place, sep) = (v.c(P::CAL_PLACE), v.c(P::CAL_BOUNCE) == 0);
+        let k = self.g.k as f32;
+        let mut size = None;
+        self.cal_text = None;
+        let mut view = v.c(P::CAL_VIEW);
+        while view > 0 {
+            if let Some(t) = calendar::build(
+                view,
+                v.c(P::CAL_STYLE) == 1,
+                ru,
+                v.c(P::CAL_WEEK) == 1,
+                v.b(P::CAL_BORDER),
+                now.date_naive(),
+                self.cal_offset,
+            ) {
+                let (w, h) = ((t.w as f32 / k).ceil(), ((t.h * 2) as f32 / k).ceil());
+                if self.sim.cal_fits(w, h, place, sep) {
+                    size = Some((w, h));
+                    self.cal_text = Some(t);
+                    break;
+                }
+            }
+            view -= 1;
+        }
+        self.sim.set_cal(size, place, v.c(P::CAL_POS), sep);
+    }
+
+    fn tick(&mut self, dt: f32) {
         let now = Local::now();
 
         if self.last_cfg_check.elapsed() >= Duration::from_secs(2) {
@@ -530,6 +832,11 @@ impl App {
             if m != self.mtime {
                 self.mtime = m;
                 self.reload();
+            }
+            let am = self.paths.alarms_mtime();
+            if am != self.alarm_mtime && !self.amenu.editing() {
+                self.alarm_mtime = am;
+                self.reload_alarms();
             }
         }
 
@@ -540,8 +847,10 @@ impl App {
             self.eval_schedule(minute, now.weekday().num_days_from_monday());
             if !first {
                 self.fire_events(minute);
+                self.check_alarms(minute, now.weekday().num_days_from_monday());
             }
         }
+        self.update_ring();
 
         let idle = self.vals.f(P::IDLE_MIN);
         if idle > 0.0 && self.idle_saved.is_none() && self.last_input.elapsed().as_secs_f32() >= idle * 60.0 {
@@ -551,15 +860,43 @@ impl App {
         }
 
         let text = time_text(&self.vals, &now);
-        self.sim.update_text(&text, &self.vals, a);
+        self.sim.update_text(&text, &self.vals, &self.assets);
         self.colon_on = !self.vals.b(P::BLINK) || now.timestamp_subsec_millis() < 500;
+        self.update_calendar(&now);
         self.sim.advance(dt, &self.vals);
     }
 }
 
+/// Календарь рисуется символами поверх холста в позиции своего тела.
+fn draw_calendar(cells: &mut [char], app: &App) {
+    let (sim, g) = (&app.sim, &app.g);
+    let Some(t) = &app.cal_text else { return };
+    if !sim.cal.on || sim.boot.is_some() || sim.outro.is_some() || !sim.fits() {
+        return;
+    }
+    let c = &sim.cal;
+    let x = c.px + (c.x - c.px) * sim.alpha;
+    let y = c.py + (c.y - c.py) * sim.alpha;
+    let k = g.k as f32;
+    let col0 = (g.ox as f32 + x * k).round() as i64;
+    let row0 = ((g.oy as f32 + y * k) / 2.0).ceil() as i64;
+    for (r, line) in t.rows.iter().enumerate() {
+        let row = row0 + r as i64;
+        if row < 0 || row >= g.rows as i64 {
+            continue;
+        }
+        for (i, &ch) in line.iter().enumerate() {
+            let col = col0 + i as i64;
+            if col < 0 || col >= g.cols as i64 {
+                continue;
+            }
+            cells[row as usize * g.cols + col as usize] = ch;
+        }
+    }
+}
+
 fn run(cli: Cli, is_vt: bool) -> io::Result<u32> {
-    let assets = Assets::new();
-    let mut app = App::new(cli, is_vt, &assets)?;
+    let mut app = App::new(cli, is_vt)?;
     let mut rend = render::Renderer::new();
     let mut cells: Vec<char> = Vec::new();
     let mut prev: Vec<char> = Vec::new();
@@ -568,6 +905,7 @@ fn run(cli: Cli, is_vt: bool) -> io::Result<u32> {
     let mut need = true;
 
     loop {
+        app.sync_style();
         if app.need_regrid {
             app.regrid();
             prev.clear();
@@ -596,14 +934,20 @@ fn run(cli: Cli, is_vt: bool) -> io::Result<u32> {
         let dt = (now - last_tick).as_secs_f32().min(0.05);
         last_tick = now;
 
-        app.tick(dt, &assets);
+        app.tick(dt);
         if app.sim.outro_done() {
             return Ok(app.sim.corners);
         }
 
-        rend.render(&app.sim, &assets, &app.vals, &app.g, app.colon_on, &mut cells);
+        rend.render(&app.sim, &app.assets, &app.vals, &app.g, app.colon_on, &mut cells);
+        draw_calendar(&mut cells, &app);
         app.ui.draw(&mut cells, app.g.cols, app.g.rows, &app.vals, app.sim.mode, app.profile.as_deref());
+        app.amenu.draw(&mut cells, app.g.cols, app.g.rows, &app.alarms);
         present(&mut out, &cells, &mut prev, app.g.cols)?;
+        if std::mem::take(&mut app.bell) {
+            queue!(out, Print('\u{7}'))?;
+            out.flush()?;
+        }
         need = false;
     }
 }

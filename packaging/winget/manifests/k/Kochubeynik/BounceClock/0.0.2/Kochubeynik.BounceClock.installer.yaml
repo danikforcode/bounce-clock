@@ -1,0 +1,21 @@
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.installer.1.9.0.schema.json
+# Хэши взять из SHA256SUMS в релизе v0.0.2 (или пересоздать манифест через wingetcreate).
+PackageIdentifier: danikforcode.BounceClock
+PackageVersion: 0.0.2
+InstallerType: zip
+NestedInstallerType: portable
+NestedInstallerFiles:
+  - RelativeFilePath: bounce-clock.exe
+    PortableCommandAlias: bounce-clock
+Commands:
+  - bounce-clock
+ReleaseDate: 2026-10-28
+Installers:
+  - Architecture: x64
+    InstallerUrl: https://github.com/USER/bounce-clock/releases/download/v0.0.2/bounce-clock-x86_64-pc-windows-msvc.zip
+    InstallerSha256: 0000000000000000000000000000000000000000000000000000000000000000
+  - Architecture: arm64
+    InstallerUrl: https://github.com/USER/bounce-clock/releases/download/v0.0.2/bounce-clock-aarch64-pc-windows-msvc.zip
+    InstallerSha256: 0000000000000000000000000000000000000000000000000000000000000000
+ManifestType: installer
+ManifestVersion: 1.9.0

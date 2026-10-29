@@ -1,6 +1,6 @@
 [package]
 name = "bounce-clock"
-version = "0.0.2"
+version = "0.0.4"
 edition = "2021"
 authors = ["Claude и идея Даниила Кочубейника"]
 description = "Пиксельные часы для терминала: отскок, статика, ручное управление"
@@ -13,6 +13,7 @@ categories = ["command-line-utilities"]
 [dependencies]
 crossterm = "0.28"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
+sys-locale = "0.3"
 
 [package.metadata.deb]
 maintainer = "Daniil Kochubeynik"

@@ -23,6 +23,14 @@ pub const MODES: &[&str] = &["bounce", "static", "manual"];
 pub const POSITIONS: &[&str] = &[
     "center", "top", "bottom", "left", "right", "tl", "tr", "bl", "br",
 ];
+pub const CAL_VIEWS: &[&str] = &["hidden", "compact", "grid"];
+pub const CAL_PLACES: &[&str] = &["below", "above", "left", "right", "free"];
+pub const PLACE_FREE: usize = 4;
+pub const CAL_BOUNCE_MODES: &[&str] = &["separate", "together"];
+pub const CAL_STYLES: &[&str] = &["short", "long"];
+pub const LANGS: &[&str] = &["auto", "ru", "en"];
+pub const WEEK_STARTS: &[&str] = &["mon", "sun"];
+pub const OUTRO_STYLES: &[&str] = &["crumble", "shatter", "explosion"];
 
 pub const SCALE: usize = 0;
 pub const BORDER: usize = 1;
@@ -49,7 +57,26 @@ pub const IDLE_MIN: usize = 21;
 pub const IDLE_MODE: usize = 22;
 pub const BOOT: usize = 23;
 pub const OUTRO: usize = 24;
-pub const N: usize = 25;
+pub const OUTRO_STYLE: usize = 25;
+pub const CAL_VIEW: usize = 26;
+pub const CAL_PLACE: usize = 27;
+pub const CAL_POS: usize = 28;
+pub const CAL_BOUNCE: usize = 29;
+pub const CAL_STYLE: usize = 30;
+pub const CAL_LANG: usize = 31;
+pub const CAL_WEEK: usize = 32;
+pub const CAL_BORDER: usize = 33;
+pub const ALARM_SNOOZE: usize = 34;
+pub const ALARM_RING: usize = 35;
+pub const STYLE: usize = 36;
+pub const BREAK_SPEED: usize = 37;
+pub const BREAK_PRESSURE: usize = 38;
+pub const N: usize = 39;
+
+/// Параметры, которые показывает меню календаря (клавиша k).
+pub const CAL_PARAMS: &[usize] = &[
+    CAL_VIEW, CAL_PLACE, CAL_POS, CAL_BOUNCE, CAL_STYLE, CAL_LANG, CAL_WEEK, CAL_BORDER,
+];
 
 const fn num(key: &'static str, min: f32, max: f32, step: f32, def: f32, help: &'static str) -> Param {
     Param { key, kind: PKind::Num { min, max, step }, def, help }
@@ -88,7 +115,21 @@ pub static PARAMS: [Param; N] = [
     num("modes.idle_minutes", 0.0, 240.0, 1.0, 0.0, "минут простоя до заставки, 0 = выкл"),
     choice("modes.idle_mode", MODES, 0.0, "режим заставки"),
     flag("fx.boot", 1.0, "сборка из пикселей при запуске"),
-    flag("fx.outro", 1.0, "осыпание при выходе"),
+    flag("fx.outro", 1.0, "анимация при выходе"),
+    choice("fx.outro_style", OUTRO_STYLES, 0.0, "эффект выхода"),
+    choice("calendar.view", CAL_VIEWS, 0.0, "календарь: скрыт, строка с датой, сетка месяца"),
+    choice("calendar.place", CAL_PLACES, 0.0, "у часов (снизу, сверху, слева, справа) или отдельно"),
+    choice("calendar.free_position", POSITIONS, 2.0, "позиция календаря при place = free"),
+    choice("calendar.bounce", CAL_BOUNCE_MODES, 0.0, "в режиме bounce: летает сам или вместе с часами"),
+    choice("calendar.compact", CAL_STYLES, 0.0, "строка с датой: коротко или полностью"),
+    choice("calendar.lang", LANGS, 0.0, "язык календаря"),
+    choice("calendar.week_start", WEEK_STARTS, 0.0, "первый день недели"),
+    flag("calendar.border", 1.0, "рамка календаря"),
+    num("alarms.snooze_minutes", 1.0, 60.0, 1.0, 5.0, "отложить будильник на, мин"),
+    num("alarms.ring_minutes", 1.0, 30.0, 1.0, 3.0, "сколько звонит будильник, мин"),
+    choice("display.style", crate::font::STYLES, 0.0, "стиль цифр"),
+    num("modes.break_speed", 0.0, 200.0, 5.0, 60.0, "ручной режим: удар об стену с такой скоростью разбивает часы, 0 = выкл"),
+    num("modes.break_pressure", 0.0, 100.0, 1.0, 20.0, "ручной режим: столько нажатий в стену — и часы трескаются, 0 = выкл"),
 ];
 
 #[derive(Clone)]
